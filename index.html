@@ -286,6 +286,7 @@
     let driftCharge = 0;
     let boostTimer  = 0;
     let boostFlash  = 0;
+    let showHowTo   = false;
     let prevEngSpeed  = 0;
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -830,6 +831,40 @@
       ctx.fillText('Esc  ·  back to menu', W/2, H - 18);
     }
 
+    function drawHowToOverlay() {
+      const pw = 420, ph = 310, px = W/2 - pw/2, py = H/2 - ph/2;
+      ctx.fillStyle = 'rgba(5,5,18,0.94)';
+      roundRect(ctx, px, py, pw, ph, 14); ctx.fill();
+      ctx.strokeStyle = '#6cf'; ctx.lineWidth = 2;
+      roundRect(ctx, px, py, pw, ph, 14); ctx.stroke();
+
+      ctx.textAlign = 'center'; ctx.fillStyle = '#6cf';
+      ctx.font = 'bold 22px Arial'; ctx.fillText('HOW TO PLAY', W/2, py + 34);
+
+      const lines = [
+        ['WASD / Arrows', 'Drive & steer'],
+        ['Space',         'Hold to drift'],
+        ['Space (hold)',  'Charges drift boost (orange → blue)'],
+        ['Space (release)','Fires speed boost  •  BOOST! flash'],
+        ['M',             'Toggle music'],
+        ['R',             'Restart race'],
+        ['Esc',           'Return to menu'],
+        ['Online',        'Host or join with a 6-letter code'],
+      ];
+      ctx.font = '15px Arial'; ctx.textAlign = 'left';
+      lines.forEach(([key, desc], i) => {
+        const lx = px + 32, rx = px + 190, ly = py + 68 + i * 28;
+        ctx.fillStyle = '#ffe066'; ctx.font = 'bold 14px Arial';
+        ctx.fillText(key, lx, ly);
+        ctx.fillStyle = '#aaa'; ctx.font = '14px Arial';
+        ctx.fillText(desc, rx, ly);
+      });
+
+      ctx.textAlign = 'center'; ctx.fillStyle = '#444';
+      ctx.font = '13px Arial';
+      ctx.fillText('click anywhere or press Esc to close', W/2, py + ph - 14);
+    }
+
     // ── Draw: menu screens ─────────────────────────────────────────────────
     function drawMenu() {
       ctx.fillStyle = '#0d0d1a';
@@ -850,10 +885,10 @@
       ctx.shadowBlur = 0;
 
       ctx.fillStyle = '#555'; ctx.font = '14px Arial';
-      ctx.fillText('SELECT MODE', W/2, 154);
+      ctx.fillText('SELECT MODE', W/2, 150);
 
       const labels = ['1 Player', '1P + CPU', '1P vs 2P  (Online)', 'Practice (Endless)', 'Leaderboard'];
-      const btnW = 340, btnH = 48, btnX = W/2 - btnW/2, btnY0 = 152;
+      const btnW = 340, btnH = 48, btnX = W/2 - btnW/2, btnY0 = 165;
       menuButtons = [];
       labels.forEach((label, i) => {
         const y   = btnY0 + i * 62;
@@ -869,6 +904,14 @@
         ctx.fillText(label, W/2, y + 30);
         menuButtons.push({ x: btnX, y, w: btnW, h: btnH, idx: i });
       });
+
+      // How To Play button (top-right)
+      const hbx = W - 114, hby = 14, hbw = 104, hbh = 26;
+      ctx.fillStyle = '#1a1a2e'; ctx.strokeStyle = '#444'; ctx.lineWidth = 1.5;
+      roundRect(ctx, hbx, hby, hbw, hbh, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#aaa'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('? How to Play', hbx + hbw/2, hby + 17);
+      menuButtons.push({ x: hbx, y: hby, w: hbw, h: hbh, idx: 'help' });
 
       ctx.fillStyle = '#444'; ctx.font = '13px Arial';
       ctx.fillText('↑ ↓  navigate  •  Enter / click  confirm', W/2, H - 16);
@@ -964,6 +1007,7 @@
 
       if (appState === 'menu') {
         drawMenu();
+        if (showHowTo) drawHowToOverlay();
       } else if (appState === 'leaderboard') {
         drawLeaderboard();
       } else if (appState === 'online_setup') {
@@ -1021,6 +1065,7 @@
     }
 
     function selectMenuOption(idx) {
+      if (idx === 'help') { showHowTo = true; return; }
       if (idx === 0) startGame('1p');
       else if (idx === 1) startGame('cpu');
       else if (idx === 2) { appState = 'online_setup'; onlineSubSel = 0; onlinePeerError = ''; onlineCreating = false; }
@@ -1179,6 +1224,7 @@
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       startMusic();
       if (appState === 'leaderboard') { appState = 'menu'; return; }
+      if (appState === 'menu' && showHowTo) { showHowTo = false; return; }
       if (appState === 'menu')
         menuButtons.forEach(b => { if (mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h) selectMenuOption(b.idx); });
       if (appState === 'online_setup')
@@ -1203,6 +1249,11 @@
       if (sfxCtx && sfxCtx.state === 'suspended') sfxCtx.resume().catch(() => {});
       if (appState === 'leaderboard') {
         if (e.key === 'Escape') appState = 'menu';
+        return;
+      }
+
+      if (appState === 'menu' && showHowTo) {
+        if (e.key === 'Escape') showHowTo = false;
         return;
       }
 
