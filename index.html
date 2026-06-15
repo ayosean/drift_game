@@ -259,8 +259,8 @@
       angle: -Math.PI / 2, velAngle: -Math.PI / 2,
       driftSide: -1, wasDrifting: false,
       speed: 0, vx: 0, vy: 0,
-      maxSpeed: 1.8, driftMaxSpeed: 2.25,
-      accel: 0.020, brake: 0.07, turnSpeed: 0.044,
+      maxSpeed: 9.5, driftMaxSpeed: 12.5,
+      accel: 0.115, brake: 0.38, turnSpeed: 0.115,
     };
 
     // ── CPU car ────────────────────────────────────────────────────────────
@@ -270,7 +270,7 @@
         width: 22, height: 36,
         angle: -Math.PI / 2, velAngle: -Math.PI / 2,
         speed: 0, vx: 0, vy: 0,
-        maxSpeed: 1.72, accel: 0.019, turnSpeed: 0.040,
+        maxSpeed: 8.8, accel: 0.108, turnSpeed: 0.105,
         waypointIdx: 1, lapCount: 0,
         prevCarX: CIRCUIT[0][0] + 40, sfCooldown: 300,
       };
@@ -346,7 +346,7 @@
     }
 
     // ── CPU AI ─────────────────────────────────────────────────────────────
-    function updateCPU() {
+    function updateCPU(dt = 1) {
       if (raceState !== 'racing') return;
       if (gameMode !== 'practice' && cpuCar.lapCount >= TOTAL_LAPS) return;
 
@@ -359,27 +359,27 @@
       const targetAngle = Math.atan2(dx, -dy);
       const diff = angleDiff(targetAngle, cpuCar.angle);
 
-      cpuCar.speed += cpuCar.accel;
+      cpuCar.speed += cpuCar.accel * dt;
       cpuCar.speed = Math.min(cpuCar.maxSpeed, cpuCar.speed);
-      cpuCar.speed *= 0.984;
+      cpuCar.speed *= Math.pow(0.984, dt);
       if (Math.abs(cpuCar.speed) < 0.005) cpuCar.speed = 0;
 
       if (Math.abs(cpuCar.speed) > 0.08)
-        cpuCar.angle += Math.max(-1, Math.min(1, diff * 3)) * cpuCar.turnSpeed;
-      cpuCar.velAngle += angleDiff(cpuCar.angle, cpuCar.velAngle) * 0.30;
+        cpuCar.angle += Math.max(-1, Math.min(1, diff * 3)) * cpuCar.turnSpeed * dt;
+      cpuCar.velAngle += angleDiff(cpuCar.angle, cpuCar.velAngle) * 0.30 * dt;
 
       cpuCar.vx = Math.sin(cpuCar.velAngle) * cpuCar.speed;
       cpuCar.vy = -Math.cos(cpuCar.velAngle) * cpuCar.speed;
-      cpuCar.x += cpuCar.vx;
-      cpuCar.y += cpuCar.vy;
+      cpuCar.x += cpuCar.vx * dt;
+      cpuCar.y += cpuCar.vy * dt;
 
       if (!isOnTrack(cpuCar.x, cpuCar.y)) {
-        cpuCar.speed *= 0.94;
-        if (cpuCar.speed > 0.65) cpuCar.speed = 0.65;
+        cpuCar.speed *= Math.pow(0.94, dt);
+        if (cpuCar.speed > 3.5) cpuCar.speed = 3.5;
       }
 
-      if (cpuCar.sfCooldown > 0) cpuCar.sfCooldown--;
-      if (cpuCar.prevCarX > 10 && cpuCar.x <= 10 && Math.abs(cpuCar.y - 380) < 55 && cpuCar.sfCooldown === 0) {
+      if (cpuCar.sfCooldown > 0) cpuCar.sfCooldown -= dt;
+      if (cpuCar.prevCarX > 10 && cpuCar.x <= 10 && Math.abs(cpuCar.y - 380) < 55 && cpuCar.sfCooldown <= 0) {
         cpuCar.lapCount++;
         cpuCar.sfCooldown = 180;
       }
@@ -447,7 +447,7 @@
     }
 
     // ── Update ─────────────────────────────────────────────────────────────
-    function update() {
+    function update(dt = 1) {
       if (appState !== 'game') return;
 
       if (raceState === 'countdown') {
@@ -464,11 +464,11 @@
           prevCarX  = car.x;
           goFlash   = 60;
         }
-        if (gameMode === 'cpu' || gameMode === 'practice') updateCPU();
+        if (gameMode === 'cpu' || gameMode === 'practice') updateCPU(dt);
         updateSFX(0, 0, true);
         return;
       }
-      if (goFlash > 0) goFlash--;
+      if (goFlash > 0) goFlash -= dt;
 
       const fwd   = keys['ArrowUp']    || keys['w'];
       const rev   = keys['ArrowDown']  || keys['s'];
@@ -476,12 +476,12 @@
       const rgt   = keys['ArrowRight'] || keys['d'];
       const drift = raceState === 'finished' ? false : keys[' '];
 
-      if (fwd) car.speed += car.accel;
-      if (rev) car.speed -= car.brake;
-      if (drift && car.speed > 0.4) car.speed += 0.007;
+      if (fwd) car.speed += car.accel * dt;
+      if (rev) car.speed -= car.brake * dt;
+      if (drift && car.speed > 0.8) car.speed += 0.014 * dt;
       const activeMax = drift ? car.driftMaxSpeed : car.maxSpeed;
-      car.speed = Math.max(-0.8, Math.min(activeMax, car.speed));
-      car.speed *= 0.984;
+      car.speed = Math.max(-3.5, Math.min(activeMax, car.speed));
+      car.speed *= Math.pow(0.984, dt);
       if (Math.abs(car.speed) < 0.005) car.speed = 0;
 
       if (drift) {
@@ -489,22 +489,22 @@
         else if (rgt) car.driftSide = 1;
         if (Math.abs(car.speed) > 0.08) {
           const sDir = car.speed >= 0 ? 1 : -1;
-          if (lft) car.velAngle -= car.turnSpeed * 1.4 * sDir;
-          if (rgt) car.velAngle += car.turnSpeed * 1.4 * sDir;
+          if (lft) car.velAngle -= car.turnSpeed * 1.4 * sDir * dt;
+          if (rgt) car.velAngle += car.turnSpeed * 1.4 * sDir * dt;
         }
         const target = car.velAngle + car.driftSide * (Math.PI * 0.30);
-        car.angle += angleDiff(target, car.angle) * 0.18;
+        car.angle += angleDiff(target, car.angle) * 0.18 * dt;
       } else {
         if (car.wasDrifting) car.velAngle = car.angle;
         if (Math.abs(car.speed) > 0.08) {
           const sDir = car.speed >= 0 ? 1 : -1;
-          if (lft) car.angle -= car.turnSpeed * sDir;
-          if (rgt) car.angle += car.turnSpeed * sDir;
+          if (lft) car.angle -= car.turnSpeed * sDir * dt;
+          if (rgt) car.angle += car.turnSpeed * sDir * dt;
         }
-        car.velAngle += angleDiff(car.angle, car.velAngle) * 0.30;
+        car.velAngle += angleDiff(car.angle, car.velAngle) * 0.30 * dt;
       }
-      if (drift && Math.abs(car.speed) > 0.35) {
-        driftCharge = Math.min(1.0, driftCharge + 0.015);
+      if (drift && Math.abs(car.speed) > 0.7) {
+        driftCharge = Math.min(1.0, driftCharge + 0.015 * dt);
       }
       if (car.wasDrifting && !drift) {
         if (driftCharge > 0.3) {
@@ -519,24 +519,24 @@
 
       car.vx = Math.sin(car.velAngle) * car.speed;
       car.vy = -Math.cos(car.velAngle) * car.speed;
-      car.x += car.vx;
-      car.y += car.vy;
+      car.x += car.vx * dt;
+      car.y += car.vy * dt;
 
       const onTrackNow = isOnTrack(car.x, car.y);
       if (!onTrackNow) {
-        car.speed *= 0.94;
-        if (car.speed > 0.65) car.speed = 0.65;
+        car.speed *= Math.pow(0.94, dt);
+        if (car.speed > 3.5) car.speed = 3.5;
       }
 
       if (boostTimer > 0) {
-        car.speed = Math.min(car.driftMaxSpeed * 1.2, car.speed + 0.030);
-        boostTimer--;
+        car.speed = Math.min(car.driftMaxSpeed * 1.2, car.speed + 0.065 * dt);
+        boostTimer -= dt;
       }
-      if (boostFlash > 0) boostFlash--;
+      if (boostFlash > 0) boostFlash -= dt;
 
       if (raceState === 'racing') {
-        if (sfCooldown > 0) sfCooldown--;
-        if (prevCarX > 10 && car.x <= 10 && Math.abs(car.y - 380) < 55 && sfCooldown === 0) {
+        if (sfCooldown > 0) sfCooldown -= dt;
+        if (prevCarX > 10 && car.x <= 10 && Math.abs(car.y - 380) < 55 && sfCooldown <= 0) {
           const now = performance.now();
           const lt  = now - lapStart;
           lapTimes.push(lt);
@@ -559,7 +559,7 @@
       const hx = Math.sin(car.angle), hy = -Math.cos(car.angle);
       const pgDot    = car.vx * hx + car.vy * hy;
       const pgLatSpd = Math.hypot(car.vx - pgDot * hx, car.vy - pgDot * hy);
-      if (drift && Math.abs(car.speed) > 0.15 && pgLatSpd > 0.1) {
+      if (drift && Math.abs(car.speed) > 0.3 && pgLatSpd > 0.2) {
         const rx = car.x - hx * car.height * 0.44;
         const ry = car.y - hy * car.height * 0.44;
         if (!hiPerf) {
@@ -577,7 +577,7 @@
         }
       }
       for (let i = skidMarks.length - 1; i >= 0; i--) {
-        skidMarks[i].life -= 0.04;
+        skidMarks[i].life -= 0.04 * dt;
         if (skidMarks[i].life <= 0) skidMarks.splice(i, 1);
       }
       // Rebuild skid canvas each frame, batched by alpha bucket (~10 draw calls)
@@ -602,11 +602,11 @@
       }
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
-        p.life -= 0.022; p.size += 0.7;
+        p.life -= 0.022 * dt; p.size += 0.7 * dt;
         if (p.life <= 0) particles.splice(i, 1);
       }
 
-      if (gameMode === 'cpu' || gameMode === 'practice') updateCPU();
+      if (gameMode === 'cpu' || gameMode === 'practice') updateCPU(dt);
 
       if (gameMode === 'online' && peerConn && peerConn.open && raceState !== 'finished')
         peerConn.send({ x: car.x, y: car.y, angle: car.angle, velAngle: car.velAngle, speed: car.speed });
@@ -1030,8 +1030,10 @@
     }
 
     // ── Main loop ──────────────────────────────────────────────────────────
-    function loop() {
-      update();
+    function loop(ts) {
+      const dt = lastTime ? Math.min((ts - lastTime) / 16.667, 3) : 1;
+      lastTime = ts;
+      update(dt);
 
       if (appState === 'menu') {
         drawMenu();
