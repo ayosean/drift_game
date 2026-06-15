@@ -272,7 +272,7 @@
         speed: 0, vx: 0, vy: 0,
         maxSpeed: 8.8, accel: 0.108, turnSpeed: 0.105,
         waypointIdx: 1, lapCount: 0,
-        prevCarX: CIRCUIT[0][0] + 40, sfCooldown: 300,
+        prevCarX: CIRCUIT[0][0] + 40, sfCooldown: 90,
       };
     }
     let cpuCar = makeCPUCar();
@@ -381,7 +381,7 @@
       if (cpuCar.sfCooldown > 0) cpuCar.sfCooldown -= dt;
       if (cpuCar.prevCarX > 10 && cpuCar.x <= 10 && Math.abs(cpuCar.y - 380) < 55 && cpuCar.sfCooldown <= 0) {
         cpuCar.lapCount++;
-        cpuCar.sfCooldown = 180;
+        cpuCar.sfCooldown = 60;
       }
       cpuCar.prevCarX = cpuCar.x;
     }
