@@ -142,6 +142,29 @@
     hitCtx.lineWidth = TRACK_W + 16;
     function isOnTrack(x, y) { return hitCtx.isPointInStroke(circuitPath, x, y); }
 
+    // Pre-render track to offscreen canvas — drawn once, composited each frame
+    const TOFF_X = 680, TOFF_Y = 560;
+    const trackCanvas = document.createElement('canvas');
+    trackCanvas.width = 1280; trackCanvas.height = 1024;
+    (function() {
+      const c = trackCanvas.getContext('2d');
+      c.save(); c.translate(TOFF_X, TOFF_Y);
+      c.lineCap = 'round'; c.lineJoin = 'round';
+      c.strokeStyle = '#c6c6c6'; c.lineWidth = TRACK_W + 16; c.stroke(circuitPath);
+      c.strokeStyle = '#575757'; c.lineWidth = TRACK_W;      c.stroke(circuitPath);
+      c.strokeStyle = '#606060'; c.lineWidth = TRACK_W - 14; c.stroke(circuitPath);
+      c.strokeStyle = 'rgba(255,210,0,0.72)'; c.lineWidth = 2;
+      c.setLineDash([28, 22]); c.stroke(circuitPath); c.setLineDash([]);
+      const [sx, sy] = CIRCUIT[0];
+      const COLS = 4, ROWS = 2, cw = 10, ch = TRACK_W / ROWS;
+      for (let r = 0; r < ROWS; r++)
+        for (let col = 0; col < COLS; col++) {
+          c.fillStyle = (r + col) % 2 === 0 ? '#fff' : '#111';
+          c.fillRect(sx - COLS*cw/2 + col*cw, sy - TRACK_W/2 + r*ch, cw, ch);
+        }
+      c.restore();
+    })();
+
     // ── Supabase ───────────────────────────────────────────────────────────
     const db = window.supabase.createClient(
       'https://zbqkjwuummurovwicwsk.supabase.co',
@@ -287,6 +310,7 @@
     let boostTimer  = 0;
     let boostFlash  = 0;
     let showHowTo   = false;
+    let hiPerf      = localStorage.getItem('driftHiPerf') === '1';
     let prevEngSpeed  = 0;
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -537,17 +561,19 @@
       if (drift && Math.abs(car.speed) > 0.15 && pgLatSpd > 0.1) {
         const rx = car.x - hx * car.height * 0.44;
         const ry = car.y - hy * car.height * 0.44;
-        particles.push({
-          x: rx + (Math.random() - 0.5) * 18,
-          y: ry + (Math.random() - 0.5) * 18,
-          life: 1.0, size: 6 + Math.random() * 7,
-        });
-        const sx = Math.cos(car.angle), sy = Math.sin(car.angle);
-        skidMarks.push(
-          { x: rx - sx * car.width * 0.38, y: ry - sy * car.width * 0.38, angle: car.velAngle, life: 1.0 },
-          { x: rx + sx * car.width * 0.38, y: ry + sy * car.width * 0.38, angle: car.velAngle, life: 1.0 }
-        );
-        if (skidMarks.length > 400) skidMarks.splice(0, 2);
+        if (!hiPerf) {
+          particles.push({
+            x: rx + (Math.random() - 0.5) * 18,
+            y: ry + (Math.random() - 0.5) * 18,
+            life: 1.0, size: 6 + Math.random() * 7,
+          });
+          const sx = Math.cos(car.angle), sy = Math.sin(car.angle);
+          skidMarks.push(
+            { x: rx - sx * car.width * 0.38, y: ry - sy * car.width * 0.38, angle: car.velAngle, life: 1.0 },
+            { x: rx + sx * car.width * 0.38, y: ry + sy * car.width * 0.38, angle: car.velAngle, life: 1.0 }
+          );
+          if (skidMarks.length > 400) skidMarks.splice(0, 2);
+        }
       }
       for (let i = skidMarks.length - 1; i >= 0; i--) {
         skidMarks[i].life -= 0.04;
@@ -591,20 +617,7 @@
     function drawTrack() {
       ctx.fillStyle = '#3d8e49';
       ctx.fillRect(-3000, -3000, 6000, 6000);
-      ctx.lineCap  = 'round';
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#c6c6c6'; ctx.lineWidth = TRACK_W + 16; ctx.stroke(circuitPath);
-      ctx.strokeStyle = '#575757'; ctx.lineWidth = TRACK_W;      ctx.stroke(circuitPath);
-      ctx.strokeStyle = '#606060'; ctx.lineWidth = TRACK_W - 14; ctx.stroke(circuitPath);
-      ctx.strokeStyle = 'rgba(255,210,0,0.72)'; ctx.lineWidth = 2;
-      ctx.setLineDash([28, 22]); ctx.stroke(circuitPath); ctx.setLineDash([]);
-      const [sx, sy] = CIRCUIT[0];
-      const COLS = 4, ROWS = 2, cw = 10, ch = TRACK_W / ROWS;
-      for (let r = 0; r < ROWS; r++)
-        for (let c = 0; c < COLS; c++) {
-          ctx.fillStyle = (r + c) % 2 === 0 ? '#fff' : '#111';
-          ctx.fillRect(sx - COLS * cw / 2 + c * cw, sy - TRACK_W / 2 + r * ch, cw, ch);
-        }
+      ctx.drawImage(trackCanvas, -TOFF_X, -TOFF_Y);
     }
 
     function drawSkidMarks() {
@@ -860,8 +873,8 @@
         ctx.fillText(desc, rx, ly);
       });
 
-      ctx.textAlign = 'center'; ctx.fillStyle = '#444';
-      ctx.font = '13px Arial';
+      ctx.textAlign = 'center'; ctx.fillStyle = '#333';
+      ctx.font = '12px Arial';
       ctx.fillText('click anywhere or press Esc to close', W/2, py + ph - 14);
     }
 
@@ -905,16 +918,29 @@
         menuButtons.push({ x: btnX, y, w: btnW, h: btnH, idx: i });
       });
 
-      // How To Play button (top-right)
-      const hbx = W - 114, hby = 14, hbw = 104, hbh = 26;
+      // How To Play + High Perf buttons (top-right)
+      const hbw = 114, hbh = 26, hbx = W - hbw - 8;
       ctx.fillStyle = '#1a1a2e'; ctx.strokeStyle = '#444'; ctx.lineWidth = 1.5;
-      roundRect(ctx, hbx, hby, hbw, hbh, 6); ctx.fill(); ctx.stroke();
+      roundRect(ctx, hbx, 10, hbw, hbh, 6); ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#aaa'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
-      ctx.fillText('? How to Play', hbx + hbw/2, hby + 17);
-      menuButtons.push({ x: hbx, y: hby, w: hbw, h: hbh, idx: 'help' });
+      ctx.fillText('? How to Play', hbx + hbw/2, 10 + 17);
+      menuButtons.push({ x: hbx, y: 10, w: hbw, h: hbh, idx: 'help' });
+
 
       ctx.fillStyle = '#444'; ctx.font = '13px Arial';
       ctx.fillText('↑ ↓  navigate  •  Enter / click  confirm', W/2, H - 16);
+
+      // High Performance Mode toggle (bottom-right)
+      const pbw = 178, pbh = 28, pbx = W - pbw - 10, pby = H - 46;
+      ctx.fillStyle = hiPerf ? '#0a2a0a' : '#161624';
+      ctx.strokeStyle = hiPerf ? '#44cc44' : '#333'; ctx.lineWidth = 1.5;
+      roundRect(ctx, pbx, pby, pbw, pbh, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = hiPerf ? '#44cc44' : '#555'; ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(hiPerf ? '⚡ High Performance: ON' : '⚡ High Performance: OFF', pbx + 10, pby + 18);
+      menuButtons.push({ x: pbx, y: pby, w: pbw, h: pbh, idx: 'perf' });
+      ctx.fillStyle = '#3a3a4a'; ctx.font = '11px Arial';
+      ctx.fillText('Disables smoke & skid marks for slow devices', pbx, pby + 38);
     }
 
     function drawOnlineSetup() {
@@ -1066,6 +1092,12 @@
 
     function selectMenuOption(idx) {
       if (idx === 'help') { showHowTo = true; return; }
+      if (idx === 'perf') {
+        hiPerf = !hiPerf;
+        localStorage.setItem('driftHiPerf', hiPerf ? '1' : '0');
+        if (hiPerf) { particles.length = 0; skidMarks.length = 0; skidCtx.clearRect(0,0,1280,1024); }
+        return;
+      }
       if (idx === 0) startGame('1p');
       else if (idx === 1) startGame('cpu');
       else if (idx === 2) { appState = 'online_setup'; onlineSubSel = 0; onlinePeerError = ''; onlineCreating = false; }
