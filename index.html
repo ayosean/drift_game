@@ -169,6 +169,8 @@
     let raceState  = 'countdown';
     let cdTimer    = 0;
     const CD_FRAMES = 4 * 100;
+    const STEP = 1000 / 60;
+    let lastTime = 0, accumulator = 0;
     let lapCount   = 0;
     let raceStart  = 0;
     let lapStart   = 0;
@@ -216,7 +218,7 @@
     // ── CPU AI ─────────────────────────────────────────────────────────────
     function updateCPU() {
       if (raceState !== 'racing') return;
-      if (cpuCar.lapCount >= TOTAL_LAPS) return;
+      if (gameMode !== 'practice' && cpuCar.lapCount >= TOTAL_LAPS) return;
 
       const target = CIRCUIT[cpuCar.waypointIdx];
       const dx = target[0] - cpuCar.x;
@@ -332,7 +334,7 @@
           prevCarX  = car.x;
           goFlash   = 60;
         }
-        if (gameMode === 'cpu') updateCPU();
+        if (gameMode === 'cpu' || gameMode === 'practice') updateCPU();
         updateSFX(0, 0, true);
         return;
       }
@@ -394,14 +396,13 @@
           lapCount++;
           lapStart   = now;
           sfCooldown = 180;
-          if (lapCount >= TOTAL_LAPS) {
+          playSFX('lap');
+          if (lapCount >= TOTAL_LAPS && gameMode !== 'practice') {
             raceState  = 'finished';
             finishTime = now - raceStart;
             playSFX('finish');
             if (gameMode === 'online' && peerConn && peerConn.open)
               peerConn.send({ type: 'finish', time: finishTime });
-          } else {
-            playSFX('lap');
           }
         }
         prevCarX = car.x;
@@ -455,7 +456,7 @@
         if (p.life <= 0) particles.splice(i, 1);
       }
 
-      if (gameMode === 'cpu') updateCPU();
+      if (gameMode === 'cpu' || gameMode === 'practice') updateCPU();
 
       if (gameMode === 'online' && peerConn && peerConn.open && raceState !== 'finished')
         peerConn.send({ x: car.x, y: car.y, angle: car.angle, velAngle: car.velAngle, speed: car.speed });
@@ -543,22 +544,24 @@
         const now          = raceState === 'racing' ? performance.now() : raceStart + finishTime;
         const curLap       = raceState === 'racing' ? now - lapStart : 0;
         const totalElapsed = raceState === 'racing' ? now - raceStart : finishTime;
-        const displayLap   = Math.min(lapCount + 1, TOTAL_LAPS);
-        const extraRow     = (gameMode === 'cpu') || (gameMode === 'online' && opponentFinished);
+        const isPractice   = gameMode === 'practice';
+        const displayLap   = isPractice ? lapCount + 1 : Math.min(lapCount + 1, TOTAL_LAPS);
+        const lapLabel     = isPractice ? 'LAP ' + displayLap : 'LAP ' + displayLap + ' / ' + TOTAL_LAPS;
+        const extraRow     = (gameMode === 'cpu') || (gameMode === 'practice') || (gameMode === 'online' && opponentFinished);
 
         ctx.fillStyle = 'rgba(0,0,0,0.65)';
         ctx.fillRect(W - 178, 36, 170, extraRow ? 100 : 80);
-        ctx.textAlign = 'right'; ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial';
-        ctx.fillText('LAP ' + displayLap + ' / ' + TOTAL_LAPS, W - 12, 56);
+        ctx.textAlign = 'right'; ctx.fillStyle = isPractice ? '#aaffaa' : '#fff'; ctx.font = 'bold 14px Arial';
+        ctx.fillText(lapLabel, W - 12, 56);
         ctx.font = '13px Arial'; ctx.fillStyle = '#ccc';
         ctx.fillText('Cur:  ' + (raceState === 'racing' ? formatTime(curLap) : '--:--.--'), W - 12, 75);
         ctx.fillStyle = fastestLap < Infinity ? '#ffe066' : '#888';
         ctx.fillText('Best: ' + formatTime(fastestLap), W - 12, 93);
         ctx.fillStyle = '#adf';
-        ctx.fillText('Total: ' + formatTime(totalElapsed), W - 12, 111);
-        if (gameMode === 'cpu') {
+        ctx.fillText(isPractice ? 'Time: ' + formatTime(totalElapsed) : 'Total: ' + formatTime(totalElapsed), W - 12, 111);
+        if (gameMode === 'cpu' || gameMode === 'practice') {
           ctx.fillStyle = '#88aaff'; ctx.font = '12px Arial';
-          ctx.fillText('CPU: Lap ' + Math.min(cpuCar.lapCount + 1, TOTAL_LAPS) + '/' + TOTAL_LAPS, W - 12, 128);
+          ctx.fillText('CPU: Lap ' + (cpuCar.lapCount + 1), W - 12, 128);
         }
         if (gameMode === 'online' && opponentFinished && opponentFinishTime != null) {
           ctx.fillStyle = '#88aaff'; ctx.font = '12px Arial';
@@ -631,11 +634,11 @@
       ctx.fillStyle = '#555'; ctx.font = '14px Arial';
       ctx.fillText('SELECT MODE', W/2, 154);
 
-      const labels = ['1 Player', '1P + CPU', '1P vs 2P  (Online)'];
-      const btnW = 340, btnH = 58, btnX = W/2 - btnW/2, btnY0 = 178;
+      const labels = ['1 Player', '1P + CPU', '1P vs 2P  (Online)', 'Practice (Endless)'];
+      const btnW = 340, btnH = 52, btnX = W/2 - btnW/2, btnY0 = 162;
       menuButtons = [];
       labels.forEach((label, i) => {
-        const y   = btnY0 + i * 76;
+        const y   = btnY0 + i * 68;
         const sel = menuSel === i;
         ctx.shadowColor = '#e63030'; ctx.shadowBlur = sel ? 16 : 0;
         ctx.fillStyle   = sel ? '#2a0808' : '#161624';
@@ -645,7 +648,7 @@
         ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
         ctx.fillStyle = sel ? '#ffffff' : '#aaaacc';
         ctx.font = sel ? 'bold 21px Arial' : '20px Arial';
-        ctx.fillText(label, W/2, y + 36);
+        ctx.fillText(label, W/2, y + 33);
         menuButtons.push({ x: btnX, y, w: btnW, h: btnH, idx: i });
       });
 
@@ -738,8 +741,12 @@
     }
 
     // ── Main loop ──────────────────────────────────────────────────────────
-    function loop() {
-      update();
+    function loop(ts) {
+      if (lastTime) {
+        accumulator += Math.min(ts - lastTime, 200);
+        while (accumulator >= STEP) { update(); accumulator -= STEP; }
+      }
+      lastTime = ts;
 
       if (appState === 'menu') {
         drawMenu();
@@ -757,7 +764,7 @@
         drawParticles();
         ctx.restore();
 
-        if (gameMode === 'cpu') drawSecondCar(cpuCar, '#3b7dd8');
+        if (gameMode === 'cpu' || gameMode === 'practice') drawSecondCar(cpuCar, '#3b7dd8');
         if (gameMode === 'online' && opponentCar) drawSecondCar(opponentCar, '#3b7dd8');
         drawCar();
         drawHUD();
@@ -787,7 +794,7 @@
       gameMode = mode;
       appState = 'game';
       resetRace();
-      if (mode === 'cpu') cpuCar = makeCPUCar();
+      if (mode === 'cpu' || mode === 'practice') cpuCar = makeCPUCar();
       if (mode === 'online') {
         opponentCar = { x: CIRCUIT[0][0], y: CIRCUIT[0][1], angle: -Math.PI/2, width: 22, height: 36 };
         opponentFinished = false; opponentFinishTime = null;
@@ -797,7 +804,8 @@
     function selectMenuOption(idx) {
       if (idx === 0) startGame('1p');
       else if (idx === 1) startGame('cpu');
-      else { appState = 'online_setup'; onlineSubSel = 0; onlinePeerError = ''; onlineCreating = false; }
+      else if (idx === 2) { appState = 'online_setup'; onlineSubSel = 0; onlinePeerError = ''; onlineCreating = false; }
+      else if (idx === 3) startGame('practice');
     }
 
     // ── Music ──────────────────────────────────────────────────────────────
@@ -962,8 +970,8 @@
       initSFX();
       if (sfxCtx && sfxCtx.state === 'suspended') sfxCtx.resume().catch(() => {});
       if (appState === 'menu') {
-        if (e.key === 'ArrowUp'   || e.key === 'w') menuSel = (menuSel - 1 + 3) % 3;
-        if (e.key === 'ArrowDown' || e.key === 's') menuSel = (menuSel + 1) % 3;
+        if (e.key === 'ArrowUp'   || e.key === 'w') menuSel = (menuSel - 1 + 4) % 4;
+        if (e.key === 'ArrowDown' || e.key === 's') menuSel = (menuSel + 1) % 4;
         if (e.key === 'Enter' || e.key === ' ') { selectMenuOption(menuSel); startMusic(); }
         e.preventDefault(); return;
       }
