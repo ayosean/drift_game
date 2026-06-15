@@ -32,6 +32,29 @@
     #muteBtn:hover { border-color: #6cf; color: #fff; }
     #volSlider { width: 120px; accent-color: #6cf; cursor: pointer; }
     #volPct { min-width: 36px; }
+    #nameOverlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.78); z-index: 99;
+      align-items: center; justify-content: center;
+    }
+    #nameBox {
+      background: #161624; border: 2px solid #ffe066;
+      border-radius: 12px; padding: 32px 40px; text-align: center;
+      box-shadow: 0 0 40px rgba(255,224,102,0.25);
+    }
+    #nameBox p { color: #ffe066; font-size: 18px; margin: 0 0 16px; }
+    #nameInput {
+      width: 220px; padding: 10px 14px; font-size: 17px;
+      background: #0d0d1a; border: 1.5px solid #444; border-radius: 8px;
+      color: #fff; outline: none; display: block; margin: 0 auto 14px;
+    }
+    #nameInput:focus { border-color: #ffe066; }
+    .name-btn {
+      padding: 9px 28px; border-radius: 8px; font-size: 15px;
+      cursor: pointer; border: none; margin: 0 6px;
+    }
+    #nameSubmitBtn { background: #ffe066; color: #111; font-weight: bold; }
+    #nameSkipBtn   { background: #222; color: #888; }
   </style>
 </head>
 <body>
@@ -50,6 +73,17 @@
     <span id="volPct">70%</span>
     <button id="sfxBtn" title="Toggle car sounds" style="color:#888">SFX OFF</button>
   </div>
+  <div id="nameOverlay">
+    <div id="nameBox">
+      <p>Enter your name for the leaderboard</p>
+      <input id="nameInput" type="text" maxlength="20" placeholder="Your name" autocomplete="off">
+      <div>
+        <button class="name-btn" id="nameSubmitBtn">Submit Score</button>
+        <button class="name-btn" id="nameSkipBtn">Skip</button>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     const canvas = document.getElementById('gameCanvas');
@@ -108,8 +142,75 @@
     hitCtx.lineWidth = TRACK_W + 16;
     function isOnTrack(x, y) { return hitCtx.isPointInStroke(circuitPath, x, y); }
 
+    // ── Supabase ───────────────────────────────────────────────────────────
+    const db = window.supabase.createClient(
+      'https://zbqkjwuummurovwicwsk.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpicWtqd3V1bW11cm92d2ljd3NrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MjkyNjgsImV4cCI6MjA5NzEwNTI2OH0.STvtb9moXDdtz98BBVgFPyaBiA-4oyLAkdpx5m9rINo'
+    );
+    let lbData        = [];
+    let lbLoading     = false;
+    let lbError       = '';
+    let scoreSubmitted = false;
+    let playerName    = localStorage.getItem('driftPlayerName') || '';
+
+    async function fetchLeaderboard() {
+      lbLoading = true; lbError = '';
+      try {
+        const { data, error } = await db
+          .from('leaderboard')
+          .select('name, time_ms, total_time_ms, mode')
+          .order('time_ms', { ascending: true })
+          .limit(10);
+        if (error) throw error;
+        lbData = data || [];
+      } catch(e) { lbError = 'Error: ' + (e.message || e); console.error('LB fetch error', e); }
+      lbLoading = false;
+    }
+
+    async function submitScore(name, bestLapMs, totalMs, mode) {
+      try {
+        await db.from('leaderboard').insert({
+          name, time_ms: Math.round(bestLapMs),
+          total_time_ms: Math.round(totalMs), mode
+        });
+      } catch(e) { console.error('Submit failed', e); }
+    }
+
+    db.channel('lb_live')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leaderboard' }, () => {
+        if (appState === 'leaderboard') fetchLeaderboard();
+      }).subscribe();
+
+    // Name overlay helpers
+    const nameOverlay   = document.getElementById('nameOverlay');
+    const nameInputEl   = document.getElementById('nameInput');
+
+    function showNamePrompt() {
+      if (playerName) { doSubmit(playerName); return; }
+      nameInputEl.value = '';
+      nameOverlay.style.display = 'flex';
+      nameInputEl.focus();
+    }
+    function hideNamePrompt() { nameOverlay.style.display = 'none'; }
+
+    async function doSubmit(name) {
+      if (!name.trim()) return;
+      playerName = name.trim().slice(0, 20);
+      localStorage.setItem('driftPlayerName', playerName);
+      scoreSubmitted = true;
+      hideNamePrompt();
+      await submitScore(playerName, fastestLap, finishTime, gameMode);
+    }
+
+    document.getElementById('nameSubmitBtn').addEventListener('click', () => doSubmit(nameInputEl.value));
+    document.getElementById('nameSkipBtn').addEventListener('click', hideNamePrompt);
+    nameInputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter') doSubmit(nameInputEl.value);
+      e.stopPropagation();
+    });
+
     // ── App state ──────────────────────────────────────────────────────────
-    // 'menu' | 'online_setup' | 'online_wait' | 'online_join' | 'game'
+    // 'menu' | 'online_setup' | 'online_wait' | 'online_join' | 'game' | 'leaderboard'
     let appState = 'menu';
     let gameMode = '1p'; // '1p' | 'cpu' | 'online'
     let menuSel  = 0;
@@ -626,32 +727,107 @@
       }
     }
 
+    let finishButtons = [];
     function drawFinishScreen() {
-      ctx.fillStyle = 'rgba(0,0,0,0.72)';
-      ctx.fillRect(W/2 - 210, H/2 - 140, 420, 290);
+      finishButtons = [];
+      ctx.fillStyle = 'rgba(0,0,0,0.78)';
+      ctx.fillRect(W/2 - 220, H/2 - 160, 440, 330);
       ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 3;
-      ctx.strokeRect(W/2 - 210, H/2 - 140, 420, 290);
+      ctx.strokeRect(W/2 - 220, H/2 - 160, 440, 330);
       ctx.textAlign = 'center'; ctx.font = 'bold 32px Arial'; ctx.fillStyle = '#ffe066';
-      ctx.fillText('RACE COMPLETE!', W/2, H/2 - 102);
+      ctx.fillText('RACE COMPLETE!', W/2, H/2 - 122);
       ctx.font = '18px Arial';
       for (let i = 0; i < lapTimes.length; i++) {
         const isBest = lapTimes[i] === fastestLap;
         ctx.fillStyle = isBest ? '#ffe066' : '#ccc';
-        ctx.fillText('Lap ' + (i+1) + ':  ' + formatTime(lapTimes[i]) + (isBest ? '  ★ BEST' : ''), W/2, H/2 - 58 + i * 32);
+        ctx.fillText('Lap ' + (i+1) + ':  ' + formatTime(lapTimes[i]) + (isBest ? '  ★ BEST' : ''), W/2, H/2 - 78 + i * 30);
       }
-      ctx.fillStyle = '#adf'; ctx.font = 'bold 22px Arial';
-      ctx.fillText('Total: ' + formatTime(finishTime), W/2, H/2 + 96);
+      ctx.fillStyle = '#adf'; ctx.font = 'bold 20px Arial';
+      ctx.fillText('Total: ' + formatTime(finishTime), W/2, H/2 + 62);
       if (gameMode === 'online' && opponentFinishTime != null) {
         const diff = finishTime - opponentFinishTime;
-        ctx.fillStyle = diff < 0 ? '#00ff88' : '#ff6666'; ctx.font = '15px Arial';
-        ctx.fillText(diff < 0 ? 'You won by ' + formatTime(Math.abs(diff)) : 'P2 won by ' + formatTime(Math.abs(diff)), W/2, H/2 + 120);
+        ctx.fillStyle = diff < 0 ? '#00ff88' : '#ff6666'; ctx.font = '14px Arial';
+        ctx.fillText(diff < 0 ? 'You won by ' + formatTime(Math.abs(diff)) : 'P2 won by ' + formatTime(Math.abs(diff)), W/2, H/2 + 82);
       }
       if (gameMode === 'cpu') {
-        ctx.fillStyle = cpuCar.lapCount >= TOTAL_LAPS ? '#ff6666' : '#00ff88'; ctx.font = '15px Arial';
-        ctx.fillText(cpuCar.lapCount >= TOTAL_LAPS ? 'CPU finished — nice race!' : 'You beat the CPU!', W/2, H/2 + 120);
+        ctx.fillStyle = cpuCar.lapCount >= TOTAL_LAPS ? '#ff6666' : '#00ff88'; ctx.font = '14px Arial';
+        ctx.fillText(cpuCar.lapCount >= TOTAL_LAPS ? 'CPU finished — nice race!' : 'You beat the CPU!', W/2, H/2 + 82);
       }
-      ctx.fillStyle = '#888'; ctx.font = '14px Arial';
-      ctx.fillText('R = race again  •  Esc = menu', W/2, H/2 + 145);
+
+      // Submit + Leaderboard buttons
+      const bw = 172, bh = 36, by = H/2 + 100;
+      const bx1 = W/2 - bw - 8, bx2 = W/2 + 8;
+
+      // Submit button
+      ctx.fillStyle = scoreSubmitted ? '#1a3a1a' : '#2a2a0a';
+      ctx.strokeStyle = scoreSubmitted ? '#44bb44' : '#ffe066';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, bx1, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = scoreSubmitted ? '#44cc44' : '#ffe066';
+      ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(scoreSubmitted ? '✓ Score Saved' : 'Submit Score', bx1 + bw/2, by + 23);
+      if (!scoreSubmitted) finishButtons.push({ x: bx1, y: by, w: bw, h: bh, action: 'submit' });
+
+      // Leaderboard button
+      ctx.fillStyle = '#0a1a2a'; ctx.strokeStyle = '#6cf'; ctx.lineWidth = 1.5;
+      roundRect(ctx, bx2, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#6cf'; ctx.font = 'bold 14px Arial';
+      ctx.fillText('View Leaderboard', bx2 + bw/2, by + 23);
+      finishButtons.push({ x: bx2, y: by, w: bw, h: bh, action: 'leaderboard' });
+
+      ctx.fillStyle = '#666'; ctx.font = '13px Arial';
+      ctx.fillText('R = race again  •  Esc = menu', W/2, H/2 + 155);
+    }
+
+    function drawLeaderboard() {
+      ctx.fillStyle = '#0d0d1a';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center'; ctx.shadowColor = '#ffe066'; ctx.shadowBlur = 18;
+      ctx.font = 'bold 42px Arial'; ctx.fillStyle = '#ffe066';
+      ctx.fillText('LEADERBOARD', W/2, 62); ctx.shadowBlur = 0;
+      ctx.font = '13px Arial'; ctx.fillStyle = '#555';
+      ctx.fillText('TOP 10  ·  SORTED BY BEST LAP', W/2, 85);
+
+      if (lbLoading) {
+        ctx.font = '20px Arial'; ctx.fillStyle = '#888';
+        ctx.fillText('Loading...', W/2, 280);
+      } else if (lbError) {
+        ctx.font = '17px Arial'; ctx.fillStyle = '#f66';
+        ctx.fillText(lbError, W/2, 280);
+      } else if (lbData.length === 0) {
+        ctx.font = '18px Arial'; ctx.fillStyle = '#666';
+        ctx.fillText('No scores yet — be the first!', W/2, 280);
+      } else {
+        const cols = { rank: 108, name: 160, lap: 430, total: 570, mode: 672 };
+        ctx.font = 'bold 12px Arial'; ctx.fillStyle = '#444'; ctx.textAlign = 'left';
+        ctx.fillText('RANK', cols.rank, 112);
+        ctx.fillText('NAME', cols.name, 112);
+        ctx.fillText('BEST LAP', cols.lap, 112);
+        ctx.fillText('TOTAL', cols.total, 112);
+        ctx.fillText('MODE', cols.mode, 112);
+        ctx.strokeStyle = '#2a2a3a'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(100, 120); ctx.lineTo(W - 100, 120); ctx.stroke();
+
+        lbData.forEach((row, i) => {
+          const y = 148 + i * 33;
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent';
+          ctx.fillRect(100, y - 20, W - 200, 30);
+          const rankColor = i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : '#666';
+          ctx.fillStyle = rankColor; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'left';
+          ctx.fillText(i + 1, cols.rank + 8, y);
+          ctx.fillStyle = i === 0 ? '#fff' : '#ccc'; ctx.font = i === 0 ? 'bold 15px Arial' : '15px Arial';
+          ctx.fillText((row.name || '???').slice(0, 16), cols.name, y);
+          ctx.fillStyle = i === 0 ? '#ffe066' : '#adf'; ctx.font = '15px Arial';
+          ctx.fillText(formatTime(row.time_ms), cols.lap, y);
+          ctx.fillStyle = '#888';
+          ctx.fillText(formatTime(row.total_time_ms), cols.total, y);
+          ctx.fillStyle = '#555'; ctx.font = '13px Arial';
+          ctx.fillText(row.mode, cols.mode, y);
+        });
+      }
+
+      ctx.textAlign = 'center'; ctx.font = '14px Arial'; ctx.fillStyle = '#444';
+      ctx.fillText('Esc  ·  back to menu', W/2, H - 18);
     }
 
     // ── Draw: menu screens ─────────────────────────────────────────────────
@@ -676,11 +852,11 @@
       ctx.fillStyle = '#555'; ctx.font = '14px Arial';
       ctx.fillText('SELECT MODE', W/2, 154);
 
-      const labels = ['1 Player', '1P + CPU', '1P vs 2P  (Online)', 'Practice (Endless)'];
-      const btnW = 340, btnH = 52, btnX = W/2 - btnW/2, btnY0 = 162;
+      const labels = ['1 Player', '1P + CPU', '1P vs 2P  (Online)', 'Practice (Endless)', 'Leaderboard'];
+      const btnW = 340, btnH = 48, btnX = W/2 - btnW/2, btnY0 = 152;
       menuButtons = [];
       labels.forEach((label, i) => {
-        const y   = btnY0 + i * 68;
+        const y   = btnY0 + i * 62;
         const sel = menuSel === i;
         ctx.shadowColor = '#e63030'; ctx.shadowBlur = sel ? 16 : 0;
         ctx.fillStyle   = sel ? '#2a0808' : '#161624';
@@ -690,7 +866,7 @@
         ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
         ctx.fillStyle = sel ? '#ffffff' : '#aaaacc';
         ctx.font = sel ? 'bold 21px Arial' : '20px Arial';
-        ctx.fillText(label, W/2, y + 33);
+        ctx.fillText(label, W/2, y + 30);
         menuButtons.push({ x: btnX, y, w: btnW, h: btnH, idx: i });
       });
 
@@ -788,6 +964,8 @@
 
       if (appState === 'menu') {
         drawMenu();
+      } else if (appState === 'leaderboard') {
+        drawLeaderboard();
       } else if (appState === 'online_setup') {
         drawOnlineSetup();
       } else if (appState === 'online_wait') {
@@ -828,6 +1006,7 @@
       prevCarX = 0; sfCooldown = 0; finishTime = 0; goFlash = 0;
       lastCDStage = -1; backfireArmed = false; prevEngSpeed = 0;
       driftCharge = 0; boostTimer = 0; boostFlash = 0;
+      scoreSubmitted = false;
     }
 
     function startGame(mode) {
@@ -846,6 +1025,7 @@
       else if (idx === 1) startGame('cpu');
       else if (idx === 2) { appState = 'online_setup'; onlineSubSel = 0; onlinePeerError = ''; onlineCreating = false; }
       else if (idx === 3) startGame('practice');
+      else if (idx === 4) { appState = 'leaderboard'; fetchLeaderboard(); }
     }
 
     // ── Music ──────────────────────────────────────────────────────────────
@@ -990,10 +1170,15 @@
         onlineSetupBtns.forEach(b => { if (mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h) onlineSubSel = b.idx; });
     });
 
+    canvas.addEventListener('dblclick', e => {
+      if (appState === 'leaderboard') appState = 'menu';
+    });
+
     canvas.addEventListener('click', e => {
       const r = canvas.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       startMusic();
+      if (appState === 'leaderboard') { appState = 'menu'; return; }
       if (appState === 'menu')
         menuButtons.forEach(b => { if (mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h) selectMenuOption(b.idx); });
       if (appState === 'online_setup')
@@ -1003,15 +1188,27 @@
             else { appState = 'online_join'; lobbyInputText = ''; onlinePeerError = ''; cleanupPeer(); }
           }
         });
+      if (appState === 'game' && raceState === 'finished')
+        finishButtons.forEach(b => {
+          if (mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h) {
+            if (b.action === 'submit') showNamePrompt();
+            if (b.action === 'leaderboard') { appState = 'leaderboard'; fetchLeaderboard(); }
+          }
+        });
     });
 
     // ── Input: keyboard ────────────────────────────────────────────────────
     window.addEventListener('keydown', e => {
       initSFX();
       if (sfxCtx && sfxCtx.state === 'suspended') sfxCtx.resume().catch(() => {});
+      if (appState === 'leaderboard') {
+        if (e.key === 'Escape') appState = 'menu';
+        return;
+      }
+
       if (appState === 'menu') {
-        if (e.key === 'ArrowUp'   || e.key === 'w') menuSel = (menuSel - 1 + 4) % 4;
-        if (e.key === 'ArrowDown' || e.key === 's') menuSel = (menuSel + 1) % 4;
+        if (e.key === 'ArrowUp'   || e.key === 'w') menuSel = (menuSel - 1 + 5) % 5;
+        if (e.key === 'ArrowDown' || e.key === 's') menuSel = (menuSel + 1) % 5;
         if (e.key === 'Enter' || e.key === ' ') { selectMenuOption(menuSel); startMusic(); }
         e.preventDefault(); return;
       }
