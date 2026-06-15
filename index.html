@@ -291,8 +291,9 @@
     // ── Race state ─────────────────────────────────────────────────────────
     const TOTAL_LAPS = 3;
     let raceState  = 'countdown';
-    let cdTimer    = 0;
+    let cdTimer    = 0; // kept for compat but unused for timing
     const CD_FRAMES = 4 * 100;
+    let countdownStart = 0;
     const STEP = 1000 / 60;
     let lastTime = 0, accumulator = 0;
     let lapCount   = 0;
@@ -450,13 +451,13 @@
       if (appState !== 'game') return;
 
       if (raceState === 'countdown') {
-        cdTimer++;
-        const cdStage = Math.floor(cdTimer / 100);
+        const cdElapsed = performance.now() - countdownStart;
+        const cdStage = Math.min(3, Math.floor(cdElapsed / 1000));
         if (cdStage !== lastCDStage && cdStage <= 3) {
           lastCDStage = cdStage;
           playSFX(cdStage < 3 ? 'countdown' : 'go');
         }
-        if (cdTimer >= CD_FRAMES) {
+        if (cdElapsed >= 4000) {
           raceState = 'racing';
           raceStart = performance.now();
           lapStart  = raceStart;
@@ -727,9 +728,10 @@
       }
 
       if (raceState === 'countdown' || goFlash > 0) {
-        const stage = raceState === 'countdown' ? Math.floor(cdTimer / 100) : 3;
+        const cdEl  = performance.now() - countdownStart;
+        const stage = raceState === 'countdown' ? Math.min(3, Math.floor(cdEl / 1000)) : 3;
         const label = ['3','2','1','GO!'][stage] || 'GO!';
-        const alpha = raceState === 'countdown' ? 1 - (cdTimer % 100) / 100 : goFlash / 60;
+        const alpha = raceState === 'countdown' ? 1 - (cdEl % 1000) / 1000 : goFlash / 60;
         ctx.save();
         ctx.globalAlpha = 0.85 * alpha + 0.15;
         ctx.textAlign = 'center'; ctx.font = 'bold 120px Arial';
@@ -1070,7 +1072,7 @@
       particles.length = 0;
       skidMarks.length = 0;
       skidCtx.clearRect(0, 0, SKID_W, SKID_H);
-      raceState = 'countdown'; cdTimer = 0;
+      raceState = 'countdown'; cdTimer = 0; countdownStart = performance.now();
       lapCount = 0; raceStart = 0; lapStart = 0;
       fastestLap = Infinity; lapTimes = [];
       prevCarX = 0; sfCooldown = 0; finishTime = 0; goFlash = 0;
