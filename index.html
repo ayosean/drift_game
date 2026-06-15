@@ -182,6 +182,9 @@
     let goFlash    = 0;
     let lastCDStage = -1;
     let backfireArmed = false;
+    let driftCharge = 0;
+    let boostTimer  = 0;
+    let boostFlash  = 0;
     let prevEngSpeed  = 0;
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -373,6 +376,18 @@
         }
         car.velAngle += angleDiff(car.angle, car.velAngle) * 0.30;
       }
+      if (drift && Math.abs(car.speed) > 0.35) {
+        driftCharge = Math.min(1.0, driftCharge + 0.015);
+      }
+      if (car.wasDrifting && !drift) {
+        if (driftCharge > 0.3) {
+          boostTimer = driftCharge > 0.75 ? 48 : 24;
+          boostFlash = 55;
+        }
+        driftCharge = 0;
+      } else if (!drift) {
+        driftCharge = 0;
+      }
       car.wasDrifting = drift;
 
       car.vx = Math.sin(car.velAngle) * car.speed;
@@ -385,6 +400,12 @@
         car.speed *= 0.94;
         if (car.speed > 0.65) car.speed = 0.65;
       }
+
+      if (boostTimer > 0) {
+        car.speed = Math.min(car.driftMaxSpeed * 1.2, car.speed + 0.030);
+        boostTimer--;
+      }
+      if (boostFlash > 0) boostFlash--;
 
       if (raceState === 'racing') {
         if (sfCooldown > 0) sfCooldown--;
@@ -510,6 +531,27 @@
       ctx.fillStyle = 'rgba(155,215,255,0.50)';
       ctx.fillRect(-cw/2 + 3, ch/2 - 13, cw - 6, 9);
       ctx.restore();
+    }
+
+    function drawBoostIndicator() {
+      if (boostFlash === 0) return;
+      const cx = W/2, cy = H/2;
+
+      // BOOST! flash text
+      if (boostFlash > 0) {
+        const t     = boostFlash / 55;
+        const scale = 1 + (1 - t) * 0.4;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, t * 2.2);
+        ctx.font        = `bold ${Math.round(32 * scale)}px monospace`;
+        ctx.fillStyle   = boostFlash > 30 ? '#88ccff' : '#ffcc00';
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.lineWidth   = 3;
+        ctx.textAlign   = 'center';
+        ctx.strokeText('BOOST!', cx, cy - 58);
+        ctx.fillText('BOOST!',   cx, cy - 58);
+        ctx.restore();
+      }
     }
 
     function drawCar() {
@@ -741,12 +783,8 @@
     }
 
     // ── Main loop ──────────────────────────────────────────────────────────
-    function loop(ts) {
-      if (lastTime) {
-        accumulator += Math.min(ts - lastTime, 200);
-        while (accumulator >= STEP) { update(); accumulator -= STEP; }
-      }
-      lastTime = ts;
+    function loop() {
+      update();
 
       if (appState === 'menu') {
         drawMenu();
@@ -767,6 +805,7 @@
         if (gameMode === 'cpu' || gameMode === 'practice') drawSecondCar(cpuCar, '#3b7dd8');
         if (gameMode === 'online' && opponentCar) drawSecondCar(opponentCar, '#3b7dd8');
         drawCar();
+        drawBoostIndicator();
         drawHUD();
         if (raceState === 'finished') drawFinishScreen();
       }
@@ -788,6 +827,7 @@
       fastestLap = Infinity; lapTimes = [];
       prevCarX = 0; sfCooldown = 0; finishTime = 0; goFlash = 0;
       lastCDStage = -1; backfireArmed = false; prevEngSpeed = 0;
+      driftCharge = 0; boostTimer = 0; boostFlash = 0;
     }
 
     function startGame(mode) {
